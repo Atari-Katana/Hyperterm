@@ -107,3 +107,4 @@ private:
     std::vector<std::vector<Cell>>& getActiveCells();
     uint32_t& getActiveCursorRow();
     uint32_t& getActiveCursorCol();
+};

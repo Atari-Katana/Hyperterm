@@ -12,10 +12,12 @@
 
 const int MAX_FRAMES_IN_FLIGHT = 2;
 
+// Validation layers are helpful for development but optional
+// Will be automatically disabled if not available
 #ifdef NDEBUG
-const bool enableValidationLayers = false;
+bool enableValidationLayers = false;
 #else
-const bool enableValidationLayers = true;
+bool enableValidationLayers = true;
 #endif
 
 const std::vector<const char*> validationLayers = {
@@ -185,8 +187,10 @@ void VulkanRenderer::populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreat
 }
 
 void VulkanRenderer::createInstance() {
+    // Check if validation layers are available, disable if not
     if (enableValidationLayers && !checkValidationLayerSupport()) {
-        throw std::runtime_error("validation layers requested, but not available!");
+        std::cerr << "Warning: Validation layers requested but not available. Disabling validation layers." << std::endl;
+        enableValidationLayers = false;
     }
     
     VkApplicationInfo appInfo{};
@@ -569,8 +573,9 @@ void VulkanRenderer::createDescriptorSetLayout() {
 }
 
 void VulkanRenderer::createGraphicsPipeline() {
-    auto vertShaderCode = readFile("shaders/text.vert");
-    auto fragShaderCode = readFile("shaders/text.frag");
+    // Load compiled SPIR-V shaders (.spv files)
+    auto vertShaderCode = readFile("shaders/text_vert.spv");
+    auto fragShaderCode = readFile("shaders/text_frag.spv");
     
     VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
     VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);

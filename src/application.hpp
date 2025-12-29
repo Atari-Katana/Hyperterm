@@ -38,13 +38,13 @@ public: // Made public for PaneManager to call
     
 private:
     GLFWwindow* window_;
-    std::unique_ptr<VulkanRenderer> renderer_;
-    std::unique_ptr<FontRenderer> fontRenderer_;
-    std::unique_ptr<PaneManager> paneManager_;
-    std::unique_ptr<MenuBar> menuBar_;
-    std::unique_ptr<WindowTiler> windowTiler_;
     std::unique_ptr<Settings> settings_;
+    std::unique_ptr<WindowTiler> windowTiler_;
     std::unique_ptr<SettingsUI> settingsUI_;
+    std::unique_ptr<MenuBar> menuBar_;
+    std::unique_ptr<PaneManager> paneManager_;
+    std::unique_ptr<FontRenderer> fontRenderer_;
+    std::unique_ptr<VulkanRenderer> renderer_; // MUST be last - destroyed last!
     
     bool isTiled_;
     std::vector<TileRect> tileRects_; // TileRect is defined in window_tiler.hpp

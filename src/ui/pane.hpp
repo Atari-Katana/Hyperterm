@@ -3,7 +3,8 @@
 #include <memory>
 #include <vector>
 
-
+// Forward declaration
+class TerminalSession;
 
 enum class SplitDirection {
     Horizontal,

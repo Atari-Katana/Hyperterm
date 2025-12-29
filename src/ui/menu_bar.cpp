@@ -7,6 +7,14 @@ MenuBar::MenuBar() : menuBarHeight_(30.0f) {
     createMenuItems();
 }
 
+void MenuBar::setRenderer(VulkanRenderer* renderer) {
+    renderer_ = renderer;
+}
+
+void MenuBar::setFontRenderer(FontRenderer* fontRenderer) {
+    fontRenderer_ = fontRenderer;
+}
+
 void MenuBar::createMenuItems() {
     menuItems_.clear();
     

@@ -29,6 +29,32 @@ namespace {
         }
         return out;
     }
+
+    // Helper struct to hold both the UTF-8 string and byte-to-column mapping
+    struct LineConversion {
+        std::string utf8String;
+        std::vector<int> byteToCol; // Maps byte offset to column index
+
+        LineConversion(const std::vector<Cell>& line) {
+            for (size_t col = 0; col < line.size(); ++col) {
+                std::string cellUtf8 = codepointToUtf8(line[col].character);
+                utf8String += cellUtf8;
+
+                // Map each byte in this cell's UTF-8 sequence to the column index
+                for (size_t i = 0; i < cellUtf8.length(); ++i) {
+                    byteToCol.push_back(static_cast<int>(col));
+                }
+            }
+        }
+
+        // Convert byte offset to column index
+        int byteToColumn(size_t byteOffset) const {
+            if (byteOffset >= byteToCol.size()) {
+                return -1; // Invalid offset
+            }
+            return byteToCol[byteOffset];
+        }
+    };
 }
 
 Application::Application() : window_(nullptr), isTiled_(false), scrollOffset_(0), 
@@ -45,11 +71,23 @@ bool Application::init() {
         std::cerr << "Failed to initialize GLFW" << std::endl;
         return false;
     }
-    
+
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    
+
     try {
+        // Initialize settings FIRST (needed by initVulkan)
+        settings_ = std::make_unique<Settings>();
+        const char* homeDir = getenv("HOME");
+        std::string configPath;
+        if (homeDir) {
+            configPath = std::string(homeDir) + "/.hyperterm/config";
+        } else {
+            std::cerr << "Warning: HOME environment variable not set. Using current directory for config." << std::endl;
+            configPath = "./.hyperterm/config";
+        }
+        settings_->load(configPath);
+
         initGraphics();
         initSubsystems();
     } catch (const std::exception& e) {
@@ -57,13 +95,13 @@ bool Application::init() {
         cleanup();
         return false;
     }
-    
+
     // Create initial pane
     Pane* initialPane = paneManager_->createRootPane();
     if (initialPane) {
         paneManager_->setActivePane(initialPane);
     }
-    
+
     return true;
 }
 
@@ -73,26 +111,23 @@ void Application::initGraphics() {
 }
 
 void Application::initSubsystems() {
-    settings_ = std::make_unique<Settings>();
-    const char* homeDir = getenv("HOME");
-    std::string configPath;
-    if (homeDir) {
-        configPath = std::string(homeDir) + "/.hyperterm/config";
-    } else {
-        std::cerr << "Warning: HOME environment variable not set. Using current directory for config." << std::endl;
-        configPath = "./.hyperterm/config";
-    }
-    settings_->load(configPath);
-    
+    std::cout << "DEBUG: initSubsystems starting..." << std::endl;
+    // Settings already initialized in init() before graphics
+    std::cout << "DEBUG: Creating PaneManager..." << std::endl;
     paneManager_ = std::make_unique<PaneManager>(this, renderer_.get(), settings_.get()); // Changed to pass 'this'
+    std::cout << "DEBUG: Creating MenuBar..." << std::endl;
     menuBar_ = std::make_unique<MenuBar>();
+    std::cout << "DEBUG: Creating WindowTiler..." << std::endl;
     windowTiler_ = std::make_unique<WindowTiler>();
+    std::cout << "DEBUG: Creating SettingsUI..." << std::endl;
     settingsUI_ = std::make_unique<SettingsUI>(settings_.get());
-    
+
+    std::cout << "DEBUG: Setting SettingsUI renderer..." << std::endl;
     // Setup settings UI with renderer (after Vulkan is initialized)
     settingsUI_->setRenderer(renderer_.get());
     settingsUI_->setFontRenderer(fontRenderer_.get());
-    
+
+    std::cout << "DEBUG: Setting MenuBar renderer..." << std::endl;
     // Setup menu bar with renderer
     menuBar_->setRenderer(renderer_.get());
     menuBar_->setFontRenderer(fontRenderer_.get());
@@ -113,34 +148,50 @@ void Application::initSubsystems() {
 }
 
 void Application::initWindow() {
+    std::cout << "DEBUG: Creating GLFW window..." << std::endl;
     window_ = glfwCreateWindow(1024, 768, "Hyperterm", nullptr, nullptr);
     if (!window_) {
         throw std::runtime_error("Failed to create GLFW window");
     }
-    
+    std::cout << "DEBUG: Window created, setting callbacks..." << std::endl;
+
     glfwSetWindowUserPointer(window_, this);
     glfwSetKeyCallback(window_, keyCallback);
     glfwSetCharCallback(window_, charCallback);
     glfwSetMouseButtonCallback(window_, mouseButtonCallback);
     glfwSetCursorPosCallback(window_, cursorPosCallback);
     glfwSetScrollCallback(window_, scrollCallback);
+    std::cout << "DEBUG: Callbacks set" << std::endl;
 }
 
 void Application::initVulkan() {
+    std::cout << "DEBUG: Creating VulkanRenderer..." << std::endl;
     renderer_ = std::make_unique<VulkanRenderer>(window_);
+    std::cout << "DEBUG: Initializing Vulkan..." << std::endl;
     renderer_->init();
-    
+    std::cout << "DEBUG: Vulkan initialized" << std::endl;
+
+    std::cout << "DEBUG: Creating FontRenderer..." << std::endl;
     fontRenderer_ = std::make_unique<FontRenderer>(
         renderer_->getDevice(),
         renderer_->getPhysicalDevice(),
         renderer_->getGraphicsQueue(),
         renderer_->getCommandPool()
     );
-    
+    std::cout << "DEBUG: Setting renderer..." << std::endl;
+    fontRenderer_->setRenderer(renderer_.get());
+    std::cout << "DEBUG: FontRenderer created" << std::endl;
+
     std::string fontPath = settings_->getFontPath();
+    std::cout << "DEBUG: Font path: " << fontPath << std::endl;
     if (!fontPath.empty()) {
-        fontRenderer_->loadFont(fontPath, settings_->getFontSize());
+        std::cout << "DEBUG: Loading font..." << std::endl;
+        if (!fontRenderer_->loadFont(fontPath, settings_->getFontSize())) {
+            std::cerr << "Warning: Failed to load font: " << fontPath << std::endl;
+        }
+        std::cout << "DEBUG: Font loaded" << std::endl;
     }
+    std::cout << "DEBUG: initVulkan complete" << std::endl;
 }
 
 void Application::run() {
@@ -148,27 +199,37 @@ void Application::run() {
 }
 
 void Application::mainLoop() {
+    std::cout << "DEBUG: Starting main loop" << std::endl;
+    int frame = 0;
     while (!glfwWindowShouldClose(window_)) {
+        if (frame == 0) std::cout << "DEBUG: Frame 0 starting" << std::endl;
         glfwPollEvents();
+        if (frame == 0) std::cout << "DEBUG: handleInput..." << std::endl;
         handleInput();
-        paneManager_->update(); // Changed
+        if (frame == 0) std::cout << "DEBUG: update..." << std::endl;
+        paneManager_->update();
+        if (frame == 0) std::cout << "DEBUG: drawFrame..." << std::endl;
         drawFrame();
+        if (frame == 0) std::cout << "DEBUG: Frame 0 complete" << std::endl;
+        frame++;
     }
-    
+
+    std::cout << "DEBUG: Main loop finished, waiting for device..." << std::endl;
     vkDeviceWaitIdle(renderer_->getDevice());
+    std::cout << "DEBUG: Device idle" << std::endl;
 }
 
 void Application::drawFrame() {
     renderer_->beginFrame();
-    
+
     // Render menu bar
     float width = static_cast<float>(renderer_->getWidth());
     float height = static_cast<float>(renderer_->getHeight());
     menuBar_->render(width, height);
-    
+
     // Render panes using PaneManager
-    paneManager_->render(0.0f, MENU_BAR_HEIGHT, width, height - MENU_BAR_HEIGHT); // Changed
-    
+    paneManager_->render(0.0f, MENU_BAR_HEIGHT, width, height - MENU_BAR_HEIGHT);
+
     // Render settings UI if visible
     if (settingsUI_->isVisible()) {
         settingsUI_->render(width, height);
@@ -178,7 +239,7 @@ void Application::drawFrame() {
     if (isSearching_) {
         renderSearchUI(width, height);
     }
-    
+
     renderer_->endFrame();
 }
 
@@ -232,6 +293,13 @@ void Application::drawTerminalContent(TerminalSession* session, float x, float y
     // --- Rendering with Scrollback and Selection ---
     uint32_t rows = session->getRows();
     uint32_t cols = session->getCols();
+
+    // Guard against division by zero
+    if (cols == 0 || rows == 0) {
+        std::cerr << "Warning: Invalid terminal dimensions (rows=" << rows << ", cols=" << cols << ")" << std::endl;
+        return;
+    }
+
     float cellWidth = width / cols;
     float cellHeight = height / rows;
     
@@ -382,6 +450,12 @@ void Application::onTile() {
 }
 
 void Application::cleanup() {
+    // Clean up components that use Vulkan resources BEFORE destroying the renderer
+    fontRenderer_.reset(); // This must be destroyed before renderer_
+    paneManager_.reset();
+    menuBar_.reset();
+    settingsUI_.reset();
+
     if (renderer_) {
         renderer_->cleanup();
     }
@@ -392,22 +466,54 @@ void Application::cleanup() {
 }
 
 bool Application::isPathSafe(const std::string& path) {
+    // Check for empty path
+    if (path.empty()) {
+        return false;
+    }
+
+    // Check path length (prevent extremely long paths)
+    if (path.length() > 4096) {
+        return false;
+    }
+
+    // Check for null bytes (security risk)
+    if (path.find('\0') != std::string::npos) {
+        return false;
+    }
+
     // Prevent absolute paths
     if (path.rfind('/', 0) == 0) {
         return false;
     }
-    
-    // Prevent directory traversal
+
+    // Prevent directory traversal (.., ./.., /.., etc.)
     if (path.find("..") != std::string::npos) {
         return false;
     }
-    
+
+    // Prevent paths starting with ./
+    if (path.rfind("./", 0) == 0) {
+        return false;
+    }
+
+    // Only allow alphanumeric, dash, underscore, dot (for extension), and forward slash
+    for (char c : path) {
+        if (!std::isalnum(static_cast<unsigned char>(c)) &&
+            c != '-' && c != '_' && c != '.' && c != '/') {
+            return false;
+        }
+    }
+
     return true;
 }
 
 void Application::keyCallback(GLFWwindow* window, int key, [[maybe_unused]] int scancode, int action, int mods) {
     auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
-    
+    if (!app) {
+        std::cerr << "Error: Application pointer is null in keyCallback" << std::endl;
+        return;
+    }
+
     // Handle settings UI first
     if (app->settingsUI_->isVisible()) {
         if (app->settingsUI_->handleKey(key, action)) {
@@ -507,6 +613,11 @@ void Application::keyCallback(GLFWwindow* window, int key, [[maybe_unused]] int 
 
 void Application::charCallback(GLFWwindow* window, unsigned int codepoint) {
     auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+    if (!app) {
+        std::cerr << "Error: Application pointer is null in charCallback" << std::endl;
+        return;
+    }
+
     app->scrollOffset_ = 0; // Reset scroll on input
     
     if (app->isSearching_) {
@@ -525,6 +636,11 @@ void Application::charCallback(GLFWwindow* window, unsigned int codepoint) {
 
 void Application::mouseButtonCallback(GLFWwindow* window, int button, int action, [[maybe_unused]] int mods) {
     auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+    if (!app) {
+        std::cerr << "Error: Application pointer is null in mouseButtonCallback" << std::endl;
+        return;
+    }
+
     double xpos, ypos;
     glfwGetCursorPos(window, &xpos, &ypos);
     float x = static_cast<float>(xpos);
@@ -546,10 +662,19 @@ void Application::mouseButtonCallback(GLFWwindow* window, int button, int action
             // Start selection in terminal area
             TerminalSession* activeSession = app->paneManager_->getActivePane()->session.get(); // Changed
             if (activeSession) {
+                uint32_t rows = activeSession->getRows();
+                uint32_t cols = activeSession->getCols();
+
+                // Guard against division by zero
+                if (rows == 0 || cols == 0) {
+                    std::cerr << "Warning: Invalid terminal dimensions for selection" << std::endl;
+                    return;
+                }
+
                 float termY = y - MENU_BAR_HEIGHT;
-                int row = static_cast<int>(termY / (app->renderer_->getHeight() / activeSession->getRows()));
-                int col = static_cast<int>(x / (app->renderer_->getWidth() / activeSession->getCols()));
-                
+                int row = static_cast<int>(termY / (app->renderer_->getHeight() / rows));
+                int col = static_cast<int>(x / (app->renderer_->getWidth() / cols));
+
                 app->isSelecting_ = true;
                 app->selectionStart_ = {row, col};
                 app->selectionEnd_ = {row, col};
@@ -562,13 +687,26 @@ void Application::mouseButtonCallback(GLFWwindow* window, int button, int action
 
 void Application::cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
     auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+    if (!app) {
+        std::cerr << "Error: Application pointer is null in cursorPosCallback" << std::endl;
+        return;
+    }
+
     if (app->isSelecting_) {
         TerminalSession* activeSession = app->paneManager_->getActivePane()->session.get(); // Changed
         if (activeSession) {
+            uint32_t rows = activeSession->getRows();
+            uint32_t cols = activeSession->getCols();
+
+            // Guard against division by zero
+            if (rows == 0 || cols == 0) {
+                return;
+            }
+
             float termY = static_cast<float>(ypos) - MENU_BAR_HEIGHT;
-            int row = static_cast<int>(termY / (app->renderer_->getHeight() / activeSession->getRows()));
-            int col = static_cast<int>(xpos / (app->renderer_->getWidth() / activeSession->getCols()));
-            
+            int row = static_cast<int>(termY / (app->renderer_->getHeight() / rows));
+            int col = static_cast<int>(xpos / (app->renderer_->getWidth() / cols));
+
             app->selectionEnd_ = {row, col};
         }
     }
@@ -622,7 +760,11 @@ std::string Application::getSelectedText() {
 
 void Application::scrollCallback(GLFWwindow* window, [[maybe_unused]] double xoffset, double yoffset) {
     auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
-    
+    if (!app) {
+        std::cerr << "Error: Application pointer is null in scrollCallback" << std::endl;
+        return;
+    }
+
     TerminalSession* activeSession = app->paneManager_->getActivePane()->session.get(); // Changed
     if (!activeSession) return; 
     
@@ -671,59 +813,30 @@ void Application::findAllMatches() {
     // Search scrollback
     for (int r = 0; r < scrollbackSize; ++r) {
         const auto& line = scrollback[r];
-        std::string lineStr;
-        for (const auto& cell : line) {
-            lineStr += codepointToUtf8(cell.character); // Convert to UTF-8 for string search
-        }
-        
-        size_t pos = lineStr.find(searchQuery_, 0);
+        LineConversion conversion(line);
+
+        size_t pos = conversion.utf8String.find(searchQuery_, 0);
         while (pos != std::string::npos) {
-            // Need to convert byte-offset 'pos' back to column index
-            int col = 0;
-            size_t byteCount = 0;
-            for(int i = 0; i < (int)line.size(); ++i) {
-                std::string cellChar = codepointToUtf8(line[i].character);
-                if(byteCount == pos) {
-                    col = i;
-                    break;
-                }
-                byteCount += cellChar.length();
-                if(byteCount > pos) { // Match starts in middle of multibyte char
-                    col = i;
-                    break;
-                }
+            int col = conversion.byteToColumn(pos);
+            if (col >= 0) {
+                searchResultCoords_.push_back({r, col});
             }
-            searchResultCoords_.push_back({r, col}); // Store absolute line index
-            pos = lineStr.find(searchQuery_, pos + 1);
+            pos = conversion.utf8String.find(searchQuery_, pos + 1);
         }
     }
 
     // Search live cells
     for (int r = 0; r < rows_count; ++r) {
         const auto& line = cells[r];
-        std::string lineStr;
-        for (const auto& cell : line) {
-            lineStr += codepointToUtf8(cell.character);
-        }
+        LineConversion conversion(line);
 
-        size_t pos = lineStr.find(searchQuery_, 0);
+        size_t pos = conversion.utf8String.find(searchQuery_, 0);
         while (pos != std::string::npos) {
-            int col = 0;
-            size_t byteCount = 0;
-            for(int i = 0; i < (int)line.size(); ++i) {
-                std::string cellChar = codepointToUtf8(line[i].character);
-                if(byteCount == pos) {
-                    col = i;
-                    break;
-                }
-                byteCount += cellChar.length();
-                if(byteCount > pos) {
-                    col = i;
-                    break;
-                }
+            int col = conversion.byteToColumn(pos);
+            if (col >= 0) {
+                searchResultCoords_.push_back({scrollbackSize + r, col});
             }
-            searchResultCoords_.push_back({scrollbackSize + r, col}); // Store absolute line index
-            pos = lineStr.find(searchQuery_, pos + 1);
+            pos = conversion.utf8String.find(searchQuery_, pos + 1);
         }
     }
 }

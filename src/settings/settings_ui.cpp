@@ -355,9 +355,16 @@ void SettingsUI::applySettings() {
     if (fontSizeChanged_) {
         settings_->setInt("font.size", fontSize_);
     }
-    
+
     // Save settings
-    std::string configPath = std::string(getenv("HOME")) + "/.hyperterm/config";
+    const char* homeDir = getenv("HOME");
+    std::string configPath;
+    if (homeDir) {
+        configPath = std::string(homeDir) + "/.hyperterm/config";
+    } else {
+        std::cerr << "Warning: HOME environment variable not set. Using current directory for config." << std::endl;
+        configPath = "./.hyperterm/config";
+    }
     settings_->save(configPath);
 }
 

@@ -4,6 +4,15 @@
 #include <iostream>
 #include <unistd.h>
 #include <sys/select.h>
+#include <cerrno>
+#include <cstring>
+
+namespace {
+    // Default terminal dimensions
+    constexpr uint32_t DEFAULT_TERMINAL_COLS = 80;
+    constexpr uint32_t DEFAULT_TERMINAL_ROWS = 24;
+    constexpr size_t PTY_BUFFER_SIZE = 4096;
+}
 
 PaneManager::PaneManager(Application* app, VulkanRenderer* renderer, Settings* settings)
     : app_(app), renderer_(renderer), settings_(settings), activePane_(nullptr), nextPaneId_(0) {
@@ -16,7 +25,8 @@ PaneManager::~PaneManager() {
 Pane* PaneManager::createRootPane() {
     auto newPane = std::make_unique<Pane>();
     newPane->id = nextPaneId_++;
-    newPane->session = std::make_unique<TerminalSession>(80, 24, renderer_, &settings_->getCurrentColorScheme());
+    newPane->session = std::make_unique<TerminalSession>(
+        DEFAULT_TERMINAL_ROWS, DEFAULT_TERMINAL_COLS, renderer_, &settings_->getCurrentColorScheme());
     
     rootPanes_.push_back(std::move(newPane));
     
@@ -182,10 +192,18 @@ void PaneManager::update() {
                     if (pane->session && pane->session->getMasterFd() >= 0) {
                         int fd = pane->session->getMasterFd();
                         if (FD_ISSET(fd, &readfds)) {
-                            char buffer[4096];
+                            char buffer[PTY_BUFFER_SIZE];
                             int bytesRead = read(fd, buffer, sizeof(buffer));
                             if (bytesRead > 0) {
                                 pane->session->processOutput(std::string(buffer, bytesRead));
+                            } else if (bytesRead == 0) {
+                                // EOF - shell has terminated
+                                std::cerr << "Shell terminated (EOF)" << std::endl;
+                            } else if (bytesRead == -1) {
+                                // Error occurred
+                                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                                    std::cerr << "Error reading from PTY: " << strerror(errno) << std::endl;
+                                }
                             }
                         }
                     }

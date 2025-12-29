@@ -69,8 +69,79 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra)
 endif()
 
-# Copy shaders to build directory
-file(COPY ${SHADER_FILES} DESTINATION ${CMAKE_BINARY_DIR}/shaders)
+# --- Shader Compilation ---
+# Find shader compiler (glslc preferred, fallback to glslangValidator)
+find_program(GLSLC glslc HINTS
+    $ENV{VULKAN_SDK}/bin
+    $ENV{VULKAN_SDK}/Bin
+    ${Vulkan_GLSLC_EXECUTABLE})
+
+find_program(GLSLANG glslangValidator HINTS
+    $ENV{VULKAN_SDK}/bin
+    $ENV{VULKAN_SDK}/Bin
+    ${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE})
+
+if(GLSLC)
+    set(SHADER_COMPILER ${GLSLC})
+    set(SHADER_COMPILE_FLAGS "")
+    message(STATUS "Found shader compiler: glslc at ${GLSLC}")
+elseif(GLSLANG)
+    set(SHADER_COMPILER ${GLSLANG})
+    set(SHADER_COMPILE_FLAGS "-V")
+    message(STATUS "Found shader compiler: glslangValidator at ${GLSLANG}")
+else()
+    message(WARNING "No shader compiler found (glslc or glslangValidator). Shaders will not be compiled.")
+    message(WARNING "Install with: sudo apt install glslang-tools")
+    set(SHADER_COMPILER "")
+endif()
+
+# Create shaders output directory
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/shaders)
+
+# Compile each shader if compiler is available
+if(SHADER_COMPILER)
+    set(COMPILED_SHADERS "")
+
+    foreach(SHADER ${SHADER_FILES})
+        get_filename_component(SHADER_NAME ${SHADER} NAME)
+        get_filename_component(SHADER_EXT ${SHADER} EXT)
+
+        # Determine output filename based on shader type
+        if(SHADER_EXT STREQUAL ".vert")
+            string(REPLACE ".vert" "_vert.spv" SPIRV_NAME ${SHADER_NAME})
+        elseif(SHADER_EXT STREQUAL ".frag")
+            string(REPLACE ".frag" "_frag.spv" SPIRV_NAME ${SHADER_NAME})
+        else()
+            set(SPIRV_NAME "${SHADER_NAME}.spv")
+        endif()
+
+        set(SPIRV_OUTPUT ${CMAKE_BINARY_DIR}/shaders/${SPIRV_NAME})
+
+        # Add custom command to compile shader
+        add_custom_command(
+            OUTPUT ${SPIRV_OUTPUT}
+            COMMAND ${SHADER_COMPILER} ${SHADER_COMPILE_FLAGS} ${SHADER} -o ${SPIRV_OUTPUT}
+            DEPENDS ${SHADER}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Compiling shader: ${SHADER_NAME} -> ${SPIRV_NAME}"
+            VERBATIM
+        )
+
+        list(APPEND COMPILED_SHADERS ${SPIRV_OUTPUT})
+    endforeach()
+
+    # Create a custom target for all compiled shaders
+    add_custom_target(compile_shaders ALL DEPENDS ${COMPILED_SHADERS})
+
+    # Make the main executable depend on compiled shaders
+    add_dependencies(${PROJECT_NAME} compile_shaders)
+
+    message(STATUS "Shader compilation configured for ${CMAKE_BUILD_TYPE} build")
+else()
+    # Fallback: just copy source shaders (won't work at runtime)
+    file(COPY ${SHADER_FILES} DESTINATION ${CMAKE_BINARY_DIR}/shaders)
+    message(WARNING "Shaders copied but not compiled - application may not work without manual shader compilation")
+endif()
 
 # --- Testing ---
 enable_testing()

@@ -6,12 +6,25 @@
 #include <stdexcept>
 
 namespace {
+    // Utility function to trim whitespace from both ends of a string
+    std::string trim(const std::string& str) {
+        if (str.empty()) return str;
+
+        size_t first = str.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos) {
+            return ""; // String is all whitespace
+        }
+
+        size_t last = str.find_last_not_of(" \t\r\n");
+        return str.substr(first, (last - first + 1));
+    }
+
     uint32_t hexToUint32(const std::string& hex) {
         if (hex.empty()) return 0;
         std::string s = hex;
         if (s[0] == '#') s.erase(0, 1);
         if (s.rfind("0x", 0) == 0) s.erase(0, 2);
-        
+
         try {
             return std::stoul(s, nullptr, 16);
         } catch (...) {
@@ -41,14 +54,9 @@ bool Settings::load(const std::string& configPath) {
     while (std::getline(file, line)) {
         size_t eqPos = line.find('=');
         if (eqPos != std::string::npos) {
-            std::string key = line.substr(0, eqPos);
-            std::string value = line.substr(eqPos + 1);
-            // Trim whitespace
-            key.erase(0, key.find_first_not_of(" 	"));
-            key.erase(key.find_last_not_of(" 	") + 1);
-            value.erase(0, value.find_first_not_of(" 	"));
-            value.erase(value.find_last_not_of(" 	") + 1);
-            values_[key] = value; // Assign the value here
+            std::string key = trim(line.substr(0, eqPos));
+            std::string value = trim(line.substr(eqPos + 1));
+            values_[key] = value;
         }
     }
     

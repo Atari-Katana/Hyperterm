@@ -53,21 +53,22 @@ bool TerminalSession::startShell() {
     
     shellPid_ = fork();
     if (shellPid_ == 0) {
+        // Child process
         close(masterFd_);
-        
+
         setsid();
         if (ioctl(slaveFd_, TIOCSCTTY, nullptr) == -1) {
             _exit(1);
         }
-        
+
         dup2(slaveFd_, STDIN_FILENO);
         dup2(slaveFd_, STDOUT_FILENO);
         dup2(slaveFd_, STDERR_FILENO);
-        
+
         if (slaveFd_ > STDERR_FILENO) {
             close(slaveFd_);
         }
-        
+
         const char* shell_env = getenv("SHELL");
         const char* shell = "/bin/bash"; // default shell
         if (shell_env) {
@@ -87,15 +88,24 @@ bool TerminalSession::startShell() {
                 std::cerr << "Warning: SHELL environment variable ('" << shell_env << "') is not in the allow-list. Falling back to default shell." << std::endl;
             }
         }
-        
+
         execl(shell, shell, nullptr);
         _exit(1);
     } else if (shellPid_ > 0) {
+        // Parent process - success
         close(slaveFd_);
         fcntl(masterFd_, F_SETFL, O_NONBLOCK);
         return true;
+    } else {
+        // Fork failed - clean up file descriptors
+        std::cerr << "Error: fork() failed" << std::endl;
+        close(masterFd_);
+        close(slaveFd_);
+        masterFd_ = -1;
+        slaveFd_ = -1;
+        return false;
     }
-    
+
     return false;
 }
 
@@ -235,16 +245,6 @@ void TerminalSession::setBackgroundImage(const std::string& path) {
         }
     }
 }
-
-const std::vector<std::vector<Cell>>& TerminalSession::getCells() const { return useAlternateBuffer_ ? altCells_ : cells_; }
-const std::deque<std::vector<Cell>>& TerminalSession::getScrollback() const { return scrollback_; }
-size_t TerminalSession::getScrollbackSize() const { return scrollback_.size(); }
-uint32_t TerminalSession::getRows() const { return rows_; }
-uint32_t TerminalSession::getCols() const { return cols_; }
-uint32_t TerminalSession::getCursorRow() const { return useAlternateBuffer_ ? altCursorRow_ : cursorRow_; }
-uint32_t TerminalSession::getCursorCol() const { return useAlternateBuffer_ ? altCursorCol_ : cursorCol_; }
-int TerminalSession::getMasterFd() const { return masterFd_; }
-
 
 std::vector<std::vector<Cell>>& TerminalSession::getActiveCells() {
     return useAlternateBuffer_ ? altCells_ : cells_;
