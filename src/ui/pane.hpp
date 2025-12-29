@@ -1,8 +1,9 @@
 #pragma once
 
-#include "../terminal/terminal_session.hpp"
 #include <memory>
 #include <vector>
+
+
 
 enum class SplitDirection {
     Horizontal,
@@ -11,7 +12,9 @@ enum class SplitDirection {
 
 struct Pane {
     int id; // Unique identifier for the pane
-    std::unique_ptr<TerminalSession> session;
+    std::unique_ptr<TerminalSession> session; // Restored
+
+
     
     Pane* parent = nullptr;
     SplitDirection splitDirection; // Only valid if this pane has children

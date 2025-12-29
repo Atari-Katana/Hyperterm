@@ -7,9 +7,9 @@
 #include <functional>
 #include <vulkan/vulkan.h>
 #include <deque>
-#include "settings/settings.hpp" // Include for ColorScheme
+#include "settings/settings.hpp"
+class VulkanRenderer; // Forward declaration
 
-class VulkanRenderer;
 
 const size_t MAX_SCROLLBACK_LINES = 1000;
 
@@ -36,13 +36,14 @@ public:
     
     void resize(uint32_t rows, uint32_t cols);
     
-    const std::vector<std::vector<Cell>>& getCells() const { return cells_; }
-    const std::deque<std::vector<Cell>>& getScrollback() const { return scrollback_; }
+    // Public getters now return current active buffer's state
+    const std::vector<std::vector<Cell>>& getCells() const { return useAlternateBuffer_ ? altCells_ : cells_; }
+    const std::deque<std::vector<Cell>>& getScrollback() const { return scrollback_; } // Scrollback is shared
     size_t getScrollbackSize() const { return scrollback_.size(); }
     uint32_t getRows() const { return rows_; }
     uint32_t getCols() const { return cols_; }
-    uint32_t getCursorRow() const { return cursorRow_; }
-    uint32_t getCursorCol() const { return cursorCol_; }
+    uint32_t getCursorRow() const { return useAlternateBuffer_ ? altCursorRow_ : cursorRow_; }
+    uint32_t getCursorCol() const { return useAlternateBuffer_ ? altCursorCol_ : cursorCol_; }
     
     void setBackgroundImage(const std::string& path);
     const std::string& getBackgroundImage() const { return backgroundImage_; }
@@ -55,16 +56,24 @@ public:
 private:
     uint32_t rows_;
     uint32_t cols_;
+
+    // Main screen buffer
     std::vector<std::vector<Cell>> cells_;
     std::deque<std::vector<Cell>> scrollback_;
     uint32_t cursorRow_;
     uint32_t cursorCol_;
+
+    // Alternate screen buffer
+    std::vector<std::vector<Cell>> altCells_;
+    uint32_t altCursorRow_;
+    uint32_t altCursorCol_;
+    bool useAlternateBuffer_;
     
     int masterFd_;
     int slaveFd_;
     pid_t shellPid_;
     
-    VulkanRenderer* renderer_;
+    VulkanRenderer* renderer_; // Restored
     const ColorScheme* colorScheme_;
     std::string backgroundImage_;
     VkImage backgroundImageTexture_;
@@ -85,13 +94,16 @@ private:
     void parseEscapeSequence(const std::string& sequence);
     void parseCSI(const std::string& params);
     uint32_t parseColorCode(int code);
-    void clearScreen();
-    void moveCursor(uint32_t row, uint32_t col);
+    void clearScreen(); // Operates on active buffer
+    void moveCursor(uint32_t row, uint32_t col); // Operates on active buffer
     void setForegroundColor(uint32_t color);
     void setBackgroundColor(uint32_t color);
-    void putChar(char32_t c);
-    void newLine();
-    void backspace();
+    void putChar(char32_t c); // Operates on active buffer
+    void newLine(); // Operates on active buffer
+    void backspace(); // Operates on active buffer
     void processByte(unsigned char byte);
-};
 
+    // Helper to get a reference to the currently active cells and cursor
+    std::vector<std::vector<Cell>>& getActiveCells();
+    uint32_t& getActiveCursorRow();
+    uint32_t& getActiveCursorCol();

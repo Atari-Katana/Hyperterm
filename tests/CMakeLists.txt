@@ -6,7 +6,6 @@ add_executable(hyperterm_tests
     ${CMAKE_SOURCE_DIR}/src/renderer/font_renderer.cpp
     ${CMAKE_SOURCE_DIR}/src/renderer/image_loader.cpp
     ${CMAKE_SOURCE_DIR}/src/terminal/terminal_session.cpp
-    ${CMAKE_SOURCE_DIR}/src/terminal/terminal_manager.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/menu_bar.cpp
     ${CMAKE_SOURCE_DIR}/src/ui/window_tiler.cpp
     ${CMAKE_SOURCE_DIR}/src/settings/settings.cpp

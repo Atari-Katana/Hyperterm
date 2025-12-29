@@ -1,6 +1,5 @@
 #include "pane_manager.hpp"
 #include "../application.hpp" // For Application::drawTerminalContent
-#include "../renderer/vulkan_renderer.hpp"
 #include "../settings/settings.hpp"
 #include <iostream>
 #include <unistd.h>
@@ -237,10 +236,6 @@ void PaneManager::renderPane(Pane* pane, float x, float y, float width, float he
         }
     }
 
-    // Optionally render borders around panes (e.g., green for active, gray for others)
-    // if (pane == activePane_) {
-    //     renderer_->renderBorder(pane->x, pane->y, pane->width, pane->height, 0.0f, 1.0f, 0.0f);
-    // } else {
-    //     renderer_->renderBorder(pane->x, pane->y, pane->width, pane->height, 0.5f, 0.5f, 0.5f);
-    // }
+    // Optionally render borders around panes
+    // renderer_->renderBorder(pane->x, pane->y, pane->width, pane->height, 1.0f, 1.0f, 1.0f, 1.0f);
 }

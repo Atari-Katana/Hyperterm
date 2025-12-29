@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+// Forward declarations
 class VulkanRenderer;
 class FontRenderer;
 
@@ -12,10 +13,10 @@ public:
     MenuBar();
     
     void render(float width, float height);
-    void setRenderer(VulkanRenderer* renderer) { renderer_ = renderer; }
-    void setFontRenderer(FontRenderer* fontRenderer) { fontRenderer_ = fontRenderer; }
+    void setRenderer(VulkanRenderer* renderer);
+    void setFontRenderer(FontRenderer* fontRenderer);
     
-    // Menu callbacks
+    // Minimal callbacks for compilation
     std::function<void()> onNewTab;
     std::function<void()> onCloseTab;
     std::function<void()> onQuit;
@@ -40,4 +41,3 @@ private:
     
     void createMenuItems();
 };
-

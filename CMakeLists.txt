@@ -18,7 +18,6 @@ set(SOURCES
     src/renderer/font_renderer.cpp
     src/renderer/image_loader.cpp
     src/terminal/terminal_session.cpp
-    src/terminal/terminal_manager.cpp
     src/ui/menu_bar.cpp
     src/ui/window_tiler.cpp
     src/settings/settings.cpp
@@ -33,7 +32,6 @@ set(HEADERS
     src/renderer/font_renderer.hpp
     src/renderer/image_loader.hpp
     src/terminal/terminal_session.hpp
-    src/terminal/terminal_manager.hpp
     src/ui/menu_bar.hpp
     src/ui/window_tiler.hpp
     src/settings/settings.hpp

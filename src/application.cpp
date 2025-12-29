@@ -378,9 +378,6 @@ void Application::onTile() {
     isTiled_ = !isTiled_;
     if (isTiled_) {
         // This will need to be adapted for paneManager
-        float width = static_cast<float>(renderer_->getWidth());
-        float height = static_cast<float>(renderer_->getHeight());
-        //windowTiler_->tileWindows(paneManager_->getTabCount(), width, height, MENU_BAR_HEIGHT, tileRects_); // Needs adaptation
     }
 }
 
@@ -668,7 +665,7 @@ void Application::findAllMatches() {
     const auto& scrollback = activeSession->getScrollback();
     const auto& cells = activeSession->getCells();
     int rows_count = activeSession->getRows();
-    int cols_count = activeSession->getCols();
+    // int cols_count = activeSession->getCols(); // Removed unused variable
     int scrollbackSize = static_cast<int>(scrollback.size());
 
     // Search scrollback

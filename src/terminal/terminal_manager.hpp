@@ -5,8 +5,7 @@
 #include <vector>
 #include <memory>
 #include <cstdint>
-
-class VulkanRenderer;
+#include "renderer/vulkan_renderer.hpp"
 
 class TerminalManager {
 public:

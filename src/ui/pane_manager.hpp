@@ -4,10 +4,10 @@
 #include <memory>
 #include <vector>
 #include <functional> // For std::function
-
-class VulkanRenderer;
-class Settings; // Forward declaration
-class Application; // Forward declaration
+// Forward declarations
+class Settings;
+class Application;
+class VulkanRenderer; // Forward declaration
 
 
 class PaneManager {
@@ -18,7 +18,7 @@ public:
     // Session/Pane management
     Pane* createRootPane();
     Pane* splitPane(Pane* pane, SplitDirection direction);
-    void closePane(Pane* pane);
+    void closePane(Pane* pane); // Re-added
     
     // Navigation
     void setActivePane(Pane* pane);

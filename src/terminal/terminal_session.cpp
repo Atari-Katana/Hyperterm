@@ -16,13 +16,21 @@
 #include <iostream>
 
 TerminalSession::TerminalSession(uint32_t rows, uint32_t cols, VulkanRenderer* renderer, const ColorScheme* colorScheme)
-    : rows_(rows), cols_(cols), cursorRow_(0), cursorCol_(0), masterFd_(-1), slaveFd_(-1), shellPid_(-1),
+    : rows_(rows), cols_(cols), 
+      cursorRow_(0), cursorCol_(0), 
+      altCursorRow_(0), altCursorCol_(0), 
+      useAlternateBuffer_(false), // Initialize alternate buffer usage
+      masterFd_(-1), slaveFd_(-1), shellPid_(-1),
       renderer_(renderer), colorScheme_(colorScheme),
       backgroundImageTexture_(VK_NULL_HANDLE), backgroundImageTextureMemory_(VK_NULL_HANDLE), backgroundImageTextureView_(VK_NULL_HANDLE),
       currentFgColor_(colorScheme->defaultFg), currentBgColor_(colorScheme->defaultBg), currentBold_(false), currentUnderline_(false),
       utf8_state_(0), utf8_codepoint_(0) {
     cells_.resize(rows_);
     for (auto& row : cells_) {
+        row.resize(cols_);
+    }
+    altCells_.resize(rows_);
+    for (auto& row : altCells_) {
         row.resize(cols_);
     }
 }
@@ -163,9 +171,14 @@ void TerminalSession::processByte(unsigned char byte) {
     if (byte < 0x20 || byte == 0x7F) { // C0 controls
         switch (byte) {
         case '\n': newLine(); break;
-        case '\r': cursorCol_ = 0; break;
+        case '\r': getActiveCursorCol() = 0; break; // Use active cursor
         case '\b': backspace(); break;
-        case '\t': for (int i = 0; i < 8 - (static_cast<int>(cursorCol_) % 8); ++i) putChar(' '); break;
+        case '\t': 
+        {
+            uint32_t& currentCursorCol = getActiveCursorCol();
+            for (int i = 0; i < 8 - (static_cast<int>(currentCursorCol) % 8); ++i) putChar(' '); 
+        }
+        break;
         case '\x1b': escapeBuffer_ = "\x1b"; break;
         case 0x7F: backspace(); break; // DEL
         // Other C0 controls are ignored
@@ -184,13 +197,21 @@ void TerminalSession::processByte(unsigned char byte) {
 void TerminalSession::resize(uint32_t rows, uint32_t cols) {
     rows_ = rows;
     cols_ = cols;
+    
     cells_.resize(rows_);
     for (auto& row : cells_) {
         row.resize(cols_);
     }
     
+    altCells_.resize(rows_);
+    for (auto& row : altCells_) {
+        row.resize(cols_);
+    }
+
     if (cursorRow_ >= rows_) cursorRow_ = rows_ - 1;
     if (cursorCol_ >= cols_) cursorCol_ = cols_ - 1;
+    if (altCursorRow_ >= rows_) altCursorRow_ = rows_ - 1;
+    if (altCursorCol_ >= cols_) altCursorCol_ = cols_ - 1;
     
     if (masterFd_ >= 0) {
         struct winsize ws;
@@ -215,37 +236,78 @@ void TerminalSession::setBackgroundImage(const std::string& path) {
     }
 }
 
+const std::vector<std::vector<Cell>>& TerminalSession::getCells() const { return useAlternateBuffer_ ? altCells_ : cells_; }
+const std::deque<std::vector<Cell>>& TerminalSession::getScrollback() const { return scrollback_; }
+size_t TerminalSession::getScrollbackSize() const { return scrollback_.size(); }
+uint32_t TerminalSession::getRows() const { return rows_; }
+uint32_t TerminalSession::getCols() const { return cols_; }
+uint32_t TerminalSession::getCursorRow() const { return useAlternateBuffer_ ? altCursorRow_ : cursorRow_; }
+uint32_t TerminalSession::getCursorCol() const { return useAlternateBuffer_ ? altCursorCol_ : cursorCol_; }
+int TerminalSession::getMasterFd() const { return masterFd_; }
+
+
+std::vector<std::vector<Cell>>& TerminalSession::getActiveCells() {
+    return useAlternateBuffer_ ? altCells_ : cells_;
+}
+
+uint32_t& TerminalSession::getActiveCursorRow() {
+    return useAlternateBuffer_ ? altCursorRow_ : cursorRow_;
+}
+
+uint32_t& TerminalSession::getActiveCursorCol() {
+    return useAlternateBuffer_ ? altCursorCol_ : cursorCol_;
+}
+
 void TerminalSession::putChar(char32_t c) {
-    if (cursorRow_ < rows_ && cursorCol_ < cols_) {
-        cells_[cursorRow_][cursorCol_].character = c;
-        cursorCol_++;
-        if (cursorCol_ >= cols_) {
+    std::vector<std::vector<Cell>>& currentCells = getActiveCells();
+    uint32_t& currentCursorRow = getActiveCursorRow();
+    uint32_t& currentCursorCol = getActiveCursorCol();
+
+    if (currentCursorRow < rows_ && currentCursorCol < cols_) {
+        currentCells[currentCursorRow][currentCursorCol].character = c;
+        currentCells[currentCursorRow][currentCursorCol].fgColor = currentFgColor_;
+        currentCells[currentCursorRow][currentCursorCol].bgColor = currentBgColor_;
+        currentCells[currentCursorRow][currentCursorCol].bold = currentBold_;
+        currentCells[currentCursorRow][currentCursorCol].underline = currentUnderline_;
+
+        currentCursorCol++;
+        if (currentCursorCol >= cols_) {
             newLine();
         }
     }
 }
 
 void TerminalSession::newLine() {
-    cursorRow_++;
-    cursorCol_ = 0;
-    if (cursorRow_ >= rows_) {
-        // Add the top line to the scrollback buffer
-        if (scrollback_.size() >= MAX_SCROLLBACK_LINES) {
-            scrollback_.pop_front();
+    uint32_t& currentCursorRow = getActiveCursorRow();
+    uint32_t& currentCursorCol = getActiveCursorCol();
+    std::vector<std::vector<Cell>>& currentCells = getActiveCells();
+
+    currentCursorRow++;
+    currentCursorCol = 0;
+    if (currentCursorRow >= rows_) {
+        // If not in alternate buffer, add to scrollback
+        if (!useAlternateBuffer_) {
+            if (scrollback_.size() >= MAX_SCROLLBACK_LINES) {
+                scrollback_.pop_front();
+            }
+            scrollback_.push_back(currentCells.front());
         }
-        scrollback_.push_back(cells_.front());
         
         // Scroll up
-        cells_.erase(cells_.begin());
-        cells_.push_back(std::vector<Cell>(cols_));
-        cursorRow_ = rows_ - 1;
+        currentCells.erase(currentCells.begin());
+        currentCells.push_back(std::vector<Cell>(cols_));
+        currentCursorRow = rows_ - 1;
     }
 }
 
 void TerminalSession::backspace() {
-    if (cursorCol_ > 0) {
-        cursorCol_--;
-        cells_[cursorRow_][cursorCol_] = Cell();
+    uint32_t& currentCursorRow = getActiveCursorRow();
+    uint32_t& currentCursorCol = getActiveCursorCol();
+    std::vector<std::vector<Cell>>& currentCells = getActiveCells();
+
+    if (currentCursorCol > 0) {
+        currentCursorCol--;
+        currentCells[currentCursorRow][currentCursorCol] = Cell();
     }
 }
 
@@ -299,7 +361,7 @@ uint32_t parseSGRColor(const std::vector<int>& codes, size_t& i, const ColorSche
 
 
 void TerminalSession::parseEscapeSequence(const std::string& sequence) {
-    if (sequence.empty()) return;
+    if (sequence.empty()) return; 
     
     if (sequence[0] == '\x1b') {
         if (sequence.length() >= 2 && sequence[1] == '[') {
@@ -313,6 +375,9 @@ void TerminalSession::parseEscapeSequence(const std::string& sequence) {
             currentBgColor_ = colorScheme_->defaultBg; // Use scheme default
             currentBold_ = false;
             currentUnderline_ = false;
+        } else if (sequence.length() >= 2 && sequence[1] == '>') {
+            // DECPrivateMode: ESC >
+            // Currently ignored
         }
     }
 }
@@ -405,30 +470,48 @@ void TerminalSession::parseCSI(const std::string& params) {
     } else if (cmd == 'A') {
         // Cursor Up: ESC [nA
         int n = codes[0] > 0 ? codes[0] : 1; // Use codes[0] instead of 'code'
-        cursorRow_ = (cursorRow_ >= static_cast<uint32_t>(n)) ? cursorRow_ - n : 0;
+        getActiveCursorRow() = (getActiveCursorRow() >= static_cast<uint32_t>(n)) ? getActiveCursorRow() - n : 0;
     } else if (cmd == 'B') {
         // Cursor Down: ESC [nB
         int n = codes[0] > 0 ? codes[0] : 1; // Use codes[0] instead of 'code'
-        cursorRow_ = std::min(cursorRow_ + static_cast<uint32_t>(n), rows_ - 1);
+        getActiveCursorRow() = std::min(getActiveCursorRow() + static_cast<uint32_t>(n), rows_ - 1);
     } else if (cmd == 'C') {
         // Cursor Forward: ESC [nC
         int n = codes[0] > 0 ? codes[0] : 1; // Use codes[0] instead of 'code'
-        cursorCol_ = std::min(cursorCol_ + static_cast<uint32_t>(n), cols_ - 1);
+        getActiveCursorCol() = std::min(getActiveCursorCol() + static_cast<uint32_t>(n), cols_ - 1);
     } else if (cmd == 'D') {
         // Cursor Back: ESC [nD
         int n = codes[0] > 0 ? codes[0] : 1; // Use codes[0] instead of 'code'
-        cursorCol_ = (cursorCol_ >= static_cast<uint32_t>(n)) ? cursorCol_ - n : 0;
+        getActiveCursorCol() = (getActiveCursorCol() >= static_cast<uint32_t>(n)) ? getActiveCursorCol() - n : 0;
     } else if (cmd == 'K') {
         // Erase in line
-        if (codes[0] == 0 || codes[0] == 1) { // Use codes[0] instead of 'code'
-            // Erase from cursor to end or beginning
-            for (uint32_t col = (codes[0] == 0 ? cursorCol_ : 0); col < cols_; col++) {
-                cells_[cursorRow_][col] = Cell();
+        int code = codes[0];
+        uint32_t& currentCursorCol = getActiveCursorCol();
+        std::vector<std::vector<Cell>>& currentCells = getActiveCells();
+
+        if (code == 0) { // Erase from cursor to end
+            for (uint32_t col = currentCursorCol; col < cols_; col++) {
+                currentCells[getActiveCursorRow()][col] = Cell();
             }
-        } else if (codes[0] == 2) { // Use codes[0] instead of 'code'
-            // Erase entire line
+        } else if (code == 1) { // Erase from beginning to cursor
+            for (uint32_t col = 0; col <= currentCursorCol; col++) {
+                currentCells[getActiveCursorRow()][col] = Cell();
+            }
+        } else if (code == 2) { // Erase entire line
             for (uint32_t col = 0; col < cols_; col++) {
-                cells_[cursorRow_][col] = Cell();
+                currentCells[getActiveCursorRow()][col] = Cell();
+            }
+        }
+    } else if (cmd == 'h' || cmd == 'l') { // Set Mode / Reset Mode
+        if (nums == "?1049") { // Alternate Screen Buffer
+            if (cmd == 'h') { // Enable alternate buffer
+                useAlternateBuffer_ = true;
+                altCells_ = std::vector<std::vector<Cell>>(rows_, std::vector<Cell>(cols_));
+                altCursorRow_ = 0;
+                altCursorCol_ = 0;
+                clearScreen(); // Clear alt screen
+            } else { // Disable alternate buffer
+                useAlternateBuffer_ = false;
             }
         }
     }
@@ -442,19 +525,29 @@ uint32_t TerminalSession::parseColorCode(int code) {
 }
 
 void TerminalSession::clearScreen() {
-    for (auto& row : cells_) {
+    std::vector<std::vector<Cell>>& currentCells = getActiveCells();
+    uint32_t& currentCursorRow = getActiveCursorRow();
+    uint32_t& currentCursorCol = getActiveCursorCol();
+
+    for (auto& row : currentCells) {
         for (auto& cell : row) {
             cell = Cell();
         }
     }
-    scrollback_.clear();
-    cursorRow_ = 0;
-    cursorCol_ = 0;
+    // Only clear scrollback if not in alternate buffer
+    if (!useAlternateBuffer_) {
+        scrollback_.clear();
+    }
+    currentCursorRow = 0;
+    currentCursorCol = 0;
 }
 
 void TerminalSession::moveCursor(uint32_t row, uint32_t col) {
-    cursorRow_ = std::min(row, rows_ - 1);
-    cursorCol_ = std::min(col, cols_ - 1);
+    uint32_t& currentCursorRow = getActiveCursorRow();
+    uint32_t& currentCursorCol = getActiveCursorCol();
+
+    currentCursorRow = std::min(row, rows_ - 1);
+    currentCursorCol = std::min(col, cols_ - 1);
 }
 
 void TerminalSession::setForegroundColor(uint32_t color) {
